@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Игровые дампы и тяжелые файлы (чтобы не нарушать авторские права)
+*.iso
+*.cso
+*.BIN
+*.bin
+*.loc
+*.ppk
+*.ptex
+*.scr
+*.png
+*.ttf
+*.otf
+
+# Рабочие папки скрипта
+*_extracted/
+EBOOT_FONTS/
+
+# Конфиги пользователя (чтобы твои пути к диску I:/ не улетели в сеть)
+generator_cfg.json
+studio_cfg.txt
+lang.conf
+
+# Разное
+.vscode/
+.idea/
+*.log
