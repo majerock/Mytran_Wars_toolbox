@@ -46,9 +46,10 @@
    ```
 
 ## 📸 Скриншоты
-*(Добавь сюда пару ссылок на скриншоты, когда зальешь проект. Просто сделай скрины программы, закинь в папку `screenshots` или прямо в issue на гитхабе и вставь ссылки сюда)*
-* [Скриншот Font Studio]
-* [Скриншот Генератора]
+<img width="1651" height="910" alt="image" src="https://github.com/user-attachments/assets/2d6fcf11-a17a-42c8-a39a-acd0f39f17c3" />
+
+<img width="479" height="722" alt="image" src="https://github.com/user-attachments/assets/383018f8-cde5-4529-b27a-12c571dcbceb" />
+
 
 ## 👥 Авторы
 * **Majerock** — Реверс-инжиниринг, программирование, перевод.
