@@ -39,8 +39,8 @@ class FontStudioWindow(tk.Toplevel):
         # Биндим Ctrl+Z глобально на окно
         self.bind("<Control-z>", self.undo)
         self.bind("<Control-Z>", self.undo)
-        self.bind("<Control-я>", self.undo)
-        self.bind("<Control-Я>", self.undo)
+        #self.bind("<Control-я>", self.undo)
+        #self.bind("<Control-Я>", self.undo)
 
     def load_studio_config(self):
         if os.path.exists("studio_cfg.txt"):

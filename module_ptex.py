@@ -61,17 +61,21 @@ def ptex_to_png(ptex_path, png_path, apply_swizzle=True):
         header = f.read(128)
         width, height = struct.unpack('<II', header[0x28:0x30])
         pixel_chunk_base = struct.unpack('<I', header[0x30:0x34])[0]
+        palette_chunk_base = struct.unpack('<I', header[0x38:0x3C])[0]
         palette_size = struct.unpack('<I', header[0x3C:0x40])[0]
 
+        # Динамически вычисляем оффсеты для палитры и пикселей
+        palette_offset = palette_chunk_base + 32 if palette_chunk_base > 0 else 144
+        
         if pixel_chunk_base > 0:
             pixel_offset = pixel_chunk_base + 32
         else:
-            pixel_offset = 144 + palette_size
+            pixel_offset = palette_offset + palette_size
 
         if palette_size > 0:
             bpp = 4 if palette_size <= 64 else 8
             
-            f.seek(144)
+            f.seek(palette_offset)
             palette_data = f.read(palette_size)
             
             f.seek(pixel_offset)
@@ -131,18 +135,22 @@ def png_to_ptex(png_path, original_ptex_path, output_ptex_path, apply_swizzle=Tr
     header = orig_data[:128]
     width, height = struct.unpack('<II', header[0x28:0x30])
     pixel_chunk_base = struct.unpack('<I', header[0x30:0x34])[0]
+    palette_chunk_base = struct.unpack('<I', header[0x38:0x3C])[0]
     palette_size = struct.unpack('<I', header[0x3C:0x40])[0]
 
+    # Вычисляем оффсеты для паковщика
+    palette_offset = palette_chunk_base + 32 if palette_chunk_base > 0 else 144
+    
     if pixel_chunk_base > 0:
         pixel_offset = pixel_chunk_base + 32
     else:
-        pixel_offset = 144 + palette_size
+        pixel_offset = palette_offset + palette_size
 
     img = Image.open(png_path).convert('RGBA')
     
     if palette_size > 0:
         bpp = 4 if palette_size <= 64 else 8
-        original_palette = orig_data[144 : 144+palette_size]
+        original_palette = orig_data[palette_offset : palette_offset+palette_size]
             
         palette_lookup = {tuple(original_palette[i:i+4]): i//4 for i in range(0, len(original_palette), 4)}
         indexed_pixels = bytearray(width * height)

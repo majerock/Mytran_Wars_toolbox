@@ -1,7 +1,9 @@
 import os
+import re
+import json
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -11,7 +13,7 @@ import module_ptex
 import module_scr
 import module_eboot
 import module_text 
-import module_hex  # <--- Новый модуль для HEX-декодера
+import module_hex
 
 from module_lang import init_langs, load_lang, get_available_langs, _
 from module_studio import FontStudioWindow
@@ -32,10 +34,23 @@ class MytranApp(tk.Tk):
         init_langs()
         
         self.title(_("title"))
-        self.geometry("750x820") # Чуть увеличили высоту под новую панель массивов
+        self.geometry("850x850") 
         self.configure(padx=10, pady=10)
         
         self.target_dir = tk.StringVar(value=os.getcwd())
+        self.lang_vars = {
+            "en": tk.BooleanVar(value=True),
+            "fr": tk.BooleanVar(value=False),
+            "de": tk.BooleanVar(value=False),
+            "es": tk.BooleanVar(value=False),
+            "it": tk.BooleanVar(value=False),
+            "ru": tk.BooleanVar(value=True)
+        }
+        
+        self.load_app_config()
+        self.target_dir.trace_add("write", lambda *a: self.save_app_config())
+        for var in self.lang_vars.values():
+            var.trace_add("write", lambda *a: self.save_app_config())
         
         top_frame = ttk.Frame(self)
         top_frame.pack(fill=tk.X, pady=(0, 10))
@@ -53,9 +68,10 @@ class MytranApp(tk.Tk):
         
         dir_frame = ttk.Frame(top_frame)
         dir_frame.pack(side=tk.TOP, fill=tk.X)
-        self.lbl_work_dir = ttk.Label(dir_frame, text=_("work_dir"))
+        self.lbl_work_dir = ttk.Label(dir_frame, text="Workspace (Папка игры):")
         self.lbl_work_dir.pack(side=tk.LEFT)
-        ttk.Entry(dir_frame, textvariable=self.target_dir, width=60).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        ttk.Entry(dir_frame, textvariable=self.target_dir).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
         self.btn_browse = ttk.Button(dir_frame, text=_("browse"), command=self.browse_dir)
         self.btn_browse.pack(side=tk.LEFT)
 
@@ -67,7 +83,7 @@ class MytranApp(tk.Tk):
         self.build_scr_tab()
         self.build_eboot_tab()
         self.build_text_tab() 
-        self.build_hex_tab()  # <--- Добавлена новая вкладка HEX-декодера
+        self.build_hex_tab()
 
         self.log_frame = ttk.LabelFrame(self, text=_("console"))
         self.log_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
@@ -77,6 +93,29 @@ class MytranApp(tk.Tk):
         import sys
         sys.stdout = PrintLogger(self.log_text)
         print(_("welcome"))
+        print("-> Инициализация Workspace: Конфигурация успешно загружена.")
+
+    def load_app_config(self):
+        try:
+            if os.path.exists("app_cfg.json"):
+                with open("app_cfg.json", "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    if os.path.exists(cfg.get("workspace", "")):
+                        self.target_dir.set(cfg["workspace"])
+                    for lang, val in cfg.get("langs", {}).items():
+                        if lang in self.lang_vars:
+                            self.lang_vars[lang].set(val)
+        except: pass
+
+    def save_app_config(self):
+        try:
+            cfg = {
+                "workspace": self.target_dir.get(),
+                "langs": {lang: var.get() for lang, var in self.lang_vars.items()}
+            }
+            with open("app_cfg.json", "w", encoding="utf-8") as f:
+                json.dump(cfg, f)
+        except: pass
 
     def browse_dir(self):
         d = filedialog.askdirectory(initialdir=self.target_dir.get())
@@ -92,7 +131,6 @@ class MytranApp(tk.Tk):
     def update_texts(self):
         self.title(_("title"))
         self.lbl_lang.config(text=_("lang_label"))
-        self.lbl_work_dir.config(text=_("work_dir"))
         self.btn_browse.config(text=_("browse"))
         
         self.notebook.tab(0, text=_("tab_ppk"))
@@ -119,8 +157,166 @@ class MytranApp(tk.Tk):
         self.btn_font_studio.config(text=_("btn_font_studio"))
         
         self.log_frame.config(text=_("console"))
-        print("\n" + _("welcome"))
 
+    # ==========================================
+    # ВКЛАДКА ТЕКСТОВ (WORKSPACE)
+    # ==========================================
+    def build_text_tab(self):
+        self.f_text = ttk.Frame(self.notebook)
+        self.notebook.add(self.f_text, text="  Тексты (Workspace)  ")
+        
+        f_langs = ttk.LabelFrame(self.f_text, text=" 1. Фильтр обрабатываемых языков ")
+        f_langs.pack(fill=tk.X, padx=20, pady=10)
+        
+        lang_container = ttk.Frame(f_langs)
+        lang_container.pack(pady=5)
+        for lang, var in self.lang_vars.items():
+            ttk.Checkbutton(lang_container, text=lang.upper(), variable=var).pack(side=tk.LEFT, padx=10)
+
+        f_batch = ttk.LabelFrame(self.f_text, text=" 2. Пакетная обработка (поиск по Workspace) ")
+        f_batch.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Button(f_batch, text="РАСПАКОВАТЬ все .bin и .loc -> .json", command=lambda: self.run_thread(self.do_batch_unpack)).pack(fill=tk.X, padx=10, pady=5)
+        ttk.Button(f_batch, text="ЗАПАКОВАТЬ все .json обратно в игру", command=lambda: self.run_thread(self.do_batch_pack)).pack(fill=tk.X, padx=10, pady=5)
+
+        f_ai = ttk.LabelFrame(self.f_text, text=" 3. Инструменты для ИИ и Анализа ")
+        f_ai.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Button(f_ai, text="Сгенерировать Дерево Файлов (_file_tree.txt)", command=lambda: self.run_thread(self.generate_tree)).pack(fill=tk.X, padx=10, pady=5)
+        ttk.Button(f_ai, text="АНАЛИЗ ФОРМАТА (Собрать HEX + JSON со всех языков)", command=lambda: self.run_thread(self.do_analyze_format)).pack(fill=tk.X, padx=10, pady=5)
+
+    def get_active_langs(self):
+        return [lang for lang, var in self.lang_vars.items() if var.get()]
+
+    def is_valid_file(self, filepath):
+        active_langs = self.get_active_langs()
+        parts = filepath.replace('\\', '/').split('/')
+        for lang in active_langs:
+            if lang in parts:
+                return True
+        if not any(l in parts for l in ["en", "fr", "de", "es", "it", "ru"]):
+            return True
+        return False
+
+    def get_lang_suffix_path(self, filepath):
+        parts = filepath.replace('\\', '/').split('/')
+        lang = ""
+        for p in parts:
+            if p.lower() in ['en', 'fr', 'de', 'it', 'es', 'ru']:
+                lang = p.lower()
+                break
+        if lang:
+            base, ext = os.path.splitext(filepath)
+            return f"{base}.{lang}{ext}.json"
+        return filepath + ".json"
+
+    def get_base_orig_path(self, json_path):
+        base = json_path[:-5]
+        base = re.sub(r'\.(en|fr|de|it|es|ru)\.(bin|loc)$', r'.\2', base, flags=re.IGNORECASE)
+        return base
+
+    def do_batch_unpack(self):
+        workspace = self.target_dir.get()
+        print(f"-> Начинаю поиск файлов в {workspace}...")
+        found = 0
+        for root, dirs, files in os.walk(workspace):
+            if "_ANALYSIS_" in root: continue
+            for f in files:
+                if f.endswith(".bin") or f.endswith(".loc"):
+                    if "_mod.bin" in f or ".bak" in f: continue
+                    filepath = os.path.join(root, f)
+                    if self.is_valid_file(filepath):
+                        lang_tag = "orig"
+                        parts = filepath.replace('\\', '/').split('/')
+                        for p in parts:
+                            if p in self.lang_vars.keys(): lang_tag = p
+                                
+                        out_json = os.path.join(root, f"{f.replace('.bin', '').replace('.loc', '')}.{lang_tag}.{f.split('.')[-1]}.json")
+                        module_text.process_file_to_json(filepath, out_json)
+                        found += 1
+        print(f"-> Пакетная распаковка завершена! Обработано файлов: {found}")
+
+    def do_batch_pack(self):
+        workspace = self.target_dir.get()
+        print(f"-> Начинаю поиск JSON-переводов в {workspace}...")
+        found = 0
+        for root, dirs, files in os.walk(workspace):
+            if "_ANALYSIS_" in root: continue
+            for f in files:
+                if f.endswith(".json"):
+                    json_path = os.path.join(root, f)
+                    if self.is_valid_file(json_path):
+                        base_name = re.sub(r'\.(en|fr|de|it|es|ru)\.(bin|loc)\.json$', '', f, flags=re.IGNORECASE)
+                        base_name = base_name.replace(".bin.json", "").replace(".loc.json", "").replace(".json", "")
+                        
+                        orig_bin = os.path.join(root, base_name + ".bin")
+                        orig_loc = os.path.join(root, base_name + ".loc")
+                        orig_pure = os.path.join(root, base_name)
+                        
+                        target_orig = None
+                        if os.path.exists(orig_pure): target_orig = orig_pure
+                        elif os.path.exists(orig_bin): target_orig = orig_bin
+                        elif os.path.exists(orig_loc): target_orig = orig_loc
+                        
+                        if target_orig:
+                            module_text.pack_json_to_file(json_path, target_orig)
+                            found += 1
+                        else:
+                            print(f"Пропуск {f}: Оригинальный файл не найден!")
+        print(f"-> Пакетная сборка завершена! Упаковано файлов: {found}")
+
+    def generate_tree(self):
+        d = self.target_dir.get()
+        out_path = os.path.join(d, "_file_tree.txt")
+        try:
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(f"Структура папки: {d}\n")
+                f.write("="*50 + "\n")
+                for root, dirs, files in os.walk(d):
+                    if "_ANALYSIS_" in root: continue
+                    level = root.replace(d, '').count(os.sep)
+                    indent = ' ' * 4 * level
+                    f.write(f"{indent}[{os.path.basename(root)}/]\n")
+                    subindent = ' ' * 4 * (level + 1)
+                    for file in files:
+                        f.write(f"{subindent}{file}\n")
+            print(f"-> Дерево файлов успешно сохранено: {out_path}")
+        except Exception as e:
+            print(f"Ошибка при создании дерева файлов: {e}")
+
+    def do_analyze_format(self):
+        filepath = filedialog.askopenfilename(title="Выберите бинарник (например affections.bin)", filetypes=[("BIN/LOC", "*.bin *.loc")])
+        if not filepath: return
+        
+        filename = os.path.basename(filepath)
+        workspace = self.target_dir.get()
+        out_dir = os.path.join(workspace, "_ANALYSIS_", filename)
+        os.makedirs(out_dir, exist_ok=True)
+        
+        print(f"\n>>> АНАЛИЗ ФОРМАТА: {filename} <<<")
+        found = 0
+        for root, dirs, files in os.walk(workspace):
+            if "_ANALYSIS_" in root: continue
+            if filename in files:
+                src = os.path.join(root, filename)
+                lang = "unknown"
+                for p in src.replace('\\', '/').split('/'):
+                    if p.lower() in ['en', 'fr', 'de', 'it', 'es', 'ru']:
+                        lang = p.lower()
+                
+                hex_path = os.path.join(out_dir, f"{filename}.{lang}.hex.txt")
+                module_hex.decode_to_hex([src], hex_path)
+                
+                json_path = os.path.join(out_dir, f"{filename}.{lang}.json")
+                module_text.process_file_to_json(src, json_path)
+                found += 1
+                
+        print(f"-> Анализ завершен! Найдено {found} вариантов файла.")
+        print(f"-> Зайдите в папку: {out_dir}")
+
+    # ==========================================
+    # ОСТАЛЬНЫЕ ВКЛАДКИ
+    # ==========================================
     def build_ppk_tab(self):
         self.f_ppk = ttk.Frame(self.notebook)
         self.notebook.add(self.f_ppk, text=_("tab_ppk"))
@@ -130,16 +326,6 @@ class MytranApp(tk.Tk):
         self.btn_unpack_ppk.pack(pady=5)
         self.btn_pack_ppk = ttk.Button(self.f_ppk, text=_("btn_pack_ppk"), width=50, command=lambda: self.run_thread(self.do_pack_ppk))
         self.btn_pack_ppk.pack(pady=5)
-
-    def do_unpack_ppk(self):
-        d = self.target_dir.get()
-        files = [f for f in os.listdir(d) if f.endswith('.ppk') and not f.endswith('_new.ppk')]
-        for f in files: module_ppk.unpack_ppk(os.path.join(d, f), os.path.join(d, f.replace('.ppk', '_extracted')))
-
-    def do_pack_ppk(self):
-        d = self.target_dir.get()
-        folders = [f for f in os.listdir(d) if os.path.isdir(os.path.join(d, f)) and f.endswith('_extracted')]
-        for f in folders: module_ppk.pack_ppk(os.path.join(d, f), os.path.join(d, f.replace('_extracted', '_new.ppk')))
 
     def build_ptex_tab(self):
         self.f_ptex = ttk.Frame(self.notebook)
@@ -151,29 +337,6 @@ class MytranApp(tk.Tk):
         self.btn_pack_ptex = ttk.Button(self.f_ptex, text=_("btn_pack_ptex"), width=50, command=lambda: self.run_thread(self.do_png_to_ptex))
         self.btn_pack_ptex.pack(pady=5)
 
-    def get_ext_folders(self):
-        d = self.target_dir.get()
-        subs = [os.path.join(d, f) for f in os.listdir(d) if os.path.isdir(os.path.join(d, f)) and f.endswith('_extracted')]
-        return subs if subs else [d]
-
-    def do_ptex_to_png(self):
-        for d in self.get_ext_folders():
-            for f in os.listdir(d):
-                if f.endswith('.ptex'):
-                    try: module_ptex.ptex_to_png(os.path.join(d, f), os.path.join(d, f.replace('.ptex', '.png')))
-                    except Exception as e: print(f"Ошибка {f}: {e}")
-
-    def do_png_to_ptex(self):
-        for d in self.get_ext_folders():
-            for f in os.listdir(d):
-                if f.endswith('.png'):
-                    orig = f
-                    for suf in ['_4444', '_5551', '_5650']: orig = orig.lower().replace(suf, "")
-                    pt_path = os.path.join(d, orig.replace('.png', '.ptex'))
-                    if os.path.exists(pt_path):
-                        try: module_ptex.png_to_ptex(os.path.join(d, f), pt_path, pt_path)
-                        except Exception as e: print(f"Ошибка {f}: {e}")
-
     def build_scr_tab(self):
         self.f_scr = ttk.Frame(self.notebook)
         self.notebook.add(self.f_scr, text=_("tab_scr"))
@@ -183,12 +346,6 @@ class MytranApp(tk.Tk):
         self.btn_scr_to_png.pack(pady=5)
         self.btn_png_to_scr = ttk.Button(self.f_scr, text=_("btn_png_to_scr"), width=50, command=lambda: self.run_thread(self.do_scr, False))
         self.btn_png_to_scr.pack(pady=5)
-
-    def do_scr(self, to_png):
-        d = self.target_dir.get()
-        ext_in, ext_out = ('.scr', '.png') if to_png else ('.png', '.scr')
-        for f in [x for x in os.listdir(d) if x.lower().endswith(ext_in)]:
-            module_scr.convert_scr(os.path.join(d, f), os.path.join(d, f.replace(ext_in, ext_out)), to_png)
 
     def build_eboot_tab(self):
         self.f_eboot = ttk.Frame(self.notebook)
@@ -222,36 +379,6 @@ class MytranApp(tk.Tk):
         self.btn_font_studio = ttk.Button(self.f_eboot, text=_("btn_font_studio"), width=50, command=self.open_font_studio)
         self.btn_font_studio.pack(pady=5)
 
-    def build_text_tab(self):
-        self.f_text = ttk.Frame(self.notebook)
-        self.notebook.add(self.f_text, text="  Тексты (.loc / .bin)  ")
-        
-        ttk.Label(self.f_text, text="Конвертация текстов игры в .txt с кодировкой Windows-1251").pack(pady=10)
-
-        # LOC
-        f_loc = ttk.LabelFrame(self.f_text, text=" Цели миссий (.loc) ")
-        f_loc.pack(fill=tk.X, padx=20, pady=5)
-        ttk.Button(f_loc, text="Распаковать .loc -> .txt", command=self.do_unpack_loc).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
-        ttk.Button(f_loc, text="Собрать .txt -> .loc", command=self.do_pack_loc).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
-
-        # BIN (Dialogues)
-        f_dlg = ttk.LabelFrame(self.f_text, text=" Диалоги (mission_*.bin) ")
-        f_dlg.pack(fill=tk.X, padx=20, pady=5)
-        ttk.Button(f_dlg, text="Распаковать .bin -> .txt", command=self.do_unpack_dlg).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
-        ttk.Button(f_dlg, text="Собрать .txt -> .bin", command=self.do_pack_dlg).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
-
-        # BIN (UI)
-        f_ui = ttk.LabelFrame(self.f_text, text=" Интерфейс игры (menu.bin) ")
-        f_ui.pack(fill=tk.X, padx=20, pady=5)
-        ttk.Button(f_ui, text="Распаковать .bin -> .txt", command=self.do_unpack_ui).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
-        ttk.Button(f_ui, text="Собрать .txt -> .bin", command=self.do_pack_ui).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
-
-        # BIN (Data Arrays - Герои, Вопросы, Навыки, Предметы, Blockmap)
-        f_arr = ttk.LabelFrame(self.f_text, text=" Системные массивы (hero, quiz, blockmap, предметы...) ")
-        f_arr.pack(fill=tk.X, padx=20, pady=5)
-        ttk.Button(f_arr, text="Умная распаковка .bin -> .txt", command=self.do_unpack_data_arrays).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
-        ttk.Button(f_arr, text="Сборка .txt -> .bin", command=self.do_pack_data_arrays).pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.X)
-        
     def build_hex_tab(self):
         self.f_hex = ttk.Frame(self.notebook)
         self.notebook.add(self.f_hex, text="  HEX Декодер  ")
@@ -267,49 +394,6 @@ class MytranApp(tk.Tk):
             command=self.do_hex_decode
         ).pack(side=tk.LEFT, padx=5, pady=10, expand=True, fill=tk.X)
 
-    # --- Функции обработчиков кнопок текста ---
-    def do_unpack_loc(self):
-        files = filedialog.askopenfilenames(filetypes=[("LOC Files", "*.loc")])
-        for f in files: self.run_thread(module_text.extract_loc, f, f + ".txt")
-
-    def do_pack_loc(self):
-        files = filedialog.askopenfilenames(filetypes=[("TXT Files", "*.txt")])
-        for f in files: 
-            out = f.replace(".txt", "") if f.endswith(".loc.txt") else f + ".loc"
-            self.run_thread(module_text.pack_loc, f, out)
-
-    def do_unpack_dlg(self):
-        files = filedialog.askopenfilenames(filetypes=[("BIN Files", "*.bin")])
-        for f in files: self.run_thread(module_text.extract_bin, f, f + ".txt")
-
-    def do_pack_dlg(self):
-        files = filedialog.askopenfilenames(filetypes=[("TXT Files", "*.txt")])
-        for f in files: 
-            out = f.replace(".txt", "") if f.endswith(".bin.txt") else f + ".bin"
-            self.run_thread(module_text.pack_bin, f, out)
-
-    def do_unpack_ui(self):
-        files = filedialog.askopenfilenames(filetypes=[("BIN Files", "*.bin")])
-        for f in files: self.run_thread(module_text.extract_ui, f, f + ".txt")
-
-    def do_pack_ui(self):
-        files = filedialog.askopenfilenames(filetypes=[("TXT Files", "*.txt")])
-        for f in files: 
-            out = f.replace(".txt", "") if f.endswith(".bin.txt") else f + ".bin"
-            self.run_thread(module_text.pack_ui, f, out)
-
-    def do_unpack_data_arrays(self):
-        files = filedialog.askopenfilenames(filetypes=[("BIN Files", "*.bin")])
-        for f in files: self.run_thread(module_text.extract_data_array, f, f + ".txt")
-
-    def do_pack_data_arrays(self):
-        files = filedialog.askopenfilenames(filetypes=[("TXT Files", "*.txt")])
-        for f in files: 
-            out = f.replace(".txt", "") if f.endswith(".bin.txt") else f + ".bin"
-            # Оригинальный BIN нужен как база для запаковки (мы редактируем только строковые блоки)
-            base_bin = out if os.path.exists(out) else f.replace(".txt", "")
-            self.run_thread(module_text.pack_data_array, f, base_bin, out.replace(".bin", "_mod.bin"))
-            
     def do_hex_decode(self):
         input_files = filedialog.askopenfilenames(
             title="Выберите файлы для HEX-декодирования",
@@ -331,6 +415,96 @@ class MytranApp(tk.Tk):
 
     def open_font_studio(self):
         FontStudioWindow(self)
+
+# ==========================================
+    # ИСПОЛНИТЕЛЬНЫЕ МЕТОДЫ ДЛЯ КНОПОК
+    # ==========================================
+    def do_unpack_ppk(self):
+        workspace = self.target_dir.get()
+        print(f"-> Поиск .ppk архивов в {workspace}...")
+        found = 0
+        for root, dirs, files in os.walk(workspace):
+            for f in files:
+                if f.lower().endswith('.ppk') and not f.lower().endswith('_new.ppk'):
+                    ppk_path = os.path.join(root, f)
+                    out_dir = ppk_path + "_extracted"
+                    module_ppk.unpack_ppk(ppk_path, out_dir)
+                    found += 1
+        print(f"-> Готово! Распаковано архивов: {found}")
+
+    def do_pack_ppk(self):
+        workspace = self.target_dir.get()
+        print(f"-> Поиск папок *_extracted в {workspace}...")
+        found = 0
+        for root, dirs, files in os.walk(workspace):
+            for d in dirs:
+                if d.endswith('.ppk_extracted') or d.endswith('.PPK_extracted'):
+                    folder_path = os.path.join(root, d)
+                    out_ppk = folder_path.replace('_extracted', '_new.ppk')
+                    module_ppk.pack_ppk(folder_path, out_ppk)
+                    found += 1
+        print(f"-> Готово! Собрано архивов: {found}")
+
+    def do_ptex_to_png(self):
+        workspace = self.target_dir.get()
+        print(f"-> Поиск текстур .ptex в {workspace}...")
+        found = 0
+        for root, dirs, files in os.walk(workspace):
+            for f in files:
+                if f.lower().endswith('.ptex') and not f.startswith('~'):
+                    ptex_path = os.path.join(root, f)
+                    png_path = ptex_path.replace('.ptex', '.png').replace('.PTEX', '.png')
+                    module_ptex.ptex_to_png(ptex_path, png_path)
+                    found += 1
+        print(f"-> Готово! Извлечено текстур: {found}")
+
+    def do_png_to_ptex(self):
+        workspace = self.target_dir.get()
+        print(f"-> Поиск .png для запаковки обратно в .ptex в {workspace}...")
+        found = 0
+        for root, dirs, files in os.walk(workspace):
+            for f in files:
+                if f.lower().endswith('.png') and not f.lower().endswith('_ru.png'):
+                    png_path = os.path.join(root, f)
+                    # Ищем оригинальный .ptex файл рядом
+                    orig_ptex = png_path.rsplit('.', 1)[0] + '.ptex'
+                    if not os.path.exists(orig_ptex):
+                        orig_ptex = png_path.rsplit('.', 1)[0] + '.PTEX'
+                        
+                    if os.path.exists(orig_ptex):
+                        out_ptex = png_path.rsplit('.', 1)[0] + '_new.ptex'
+                        module_ptex.png_to_ptex(png_path, orig_ptex, out_ptex)
+                        found += 1
+        print(f"-> Готово! Запаковано текстур: {found}")
+
+    def do_scr(self, to_png):
+        workspace = self.target_dir.get()
+        found = 0
+        if to_png:
+            print(f"-> Поиск экранов .scr в {workspace}...")
+            for root, dirs, files in os.walk(workspace):
+                for f in files:
+                    if f.lower().endswith('.scr'):
+                        in_path = os.path.join(root, f)
+                        out_path = in_path.replace('.scr', '.png').replace('.SCR', '.png')
+                        module_scr.convert_scr(in_path, out_path, to_png=True)
+                        found += 1
+        else:
+            print(f"-> Поиск экранов .png для запаковки в {workspace}...")
+            for root, dirs, files in os.walk(workspace):
+                for f in files:
+                    if f.lower().endswith('.png'):
+                        in_path = os.path.join(root, f)
+                        orig_scr = in_path.rsplit('.', 1)[0] + '.scr'
+                        if not os.path.exists(orig_scr):
+                            orig_scr = in_path.rsplit('.', 1)[0] + '.SCR'
+                            
+                        # Пакуем только если рядом есть оригинальный .scr (защита от мусора)
+                        if os.path.exists(orig_scr):
+                            out_path = in_path.rsplit('.', 1)[0] + '_new.scr'
+                            module_scr.convert_scr(in_path, out_path, to_png=False)
+                            found += 1
+        print(f"-> Готово! Обработано экранов: {found}")
 
 if __name__ == "__main__":
     app = MytranApp()
